@@ -1,0 +1,138 @@
+<script>
+    let scene, camera, renderer, particles;
+    const count = 5000; // Ditambah agar tulisan lebih padat
+    const targetPos = new Float32Array(count * 3);
+    
+    function initScene() {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        camera.position.z = 12;
+
+        renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        const geo = new THREE.BufferGeometry();
+        const initialPos = new Float32Array(count * 3);
+        for(let i=0; i<count*3; i++) initialPos[i] = (Math.random()-0.5)*20;
+        
+        geo.setAttribute('position', new THREE.BufferAttribute(initialPos, 3));
+        const mat = new THREE.PointsMaterial({
+            size: 0.08, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending
+        });
+        particles = new THREE.Points(geo, mat);
+        scene.add(particles);
+        for(let i=0; i<count*3; i++) targetPos[i] = initialPos[i];
+    }
+
+    // --- GENERATOR TULISAN "I LOVE YOU" ---
+    // Fungsi ini memetakan partikel ke koordinat huruf sederhana
+    const setLoveText = () => {
+        const points = [];
+        // Huruf I
+        for(let y=-3; y<=3; y+=0.5) points.push({x: -6, y: y});
+        // Huruf L
+        for(let y=-3; y<=3; y+=0.5) points.push({x: -3, y: y});
+        for(let x=-3; x<=-1; x+=0.5) points.push({x: x, y: -3});
+        // Huruf O (Kotak)
+        for(let y=-3; y<=3; y+=0.5) { points.push({x: 1, y: y}); points.push({x: 3, y: y}); }
+        for(let x=1; x<=3; x+=0.5) { points.push({x: x, y: 3}); points.push({x: x, y: -3}); }
+        // Huruf V
+        for(let y=-3; y<=3; y+=0.5) points.push({x: 5 + (y+3)*0.3, y: y});
+        for(let y=-3; y<=3; y+=0.5) points.push({x: 7 - (y+3)*0.3, y: y});
+        // Huruf U
+        for(let y=-3; y<=3; y+=0.5) { points.push({x: 9, y: y}); points.push({x: 11, y: y}); }
+        for(let x=9; x<=11; x+=0.5) points.push({x: x, y: -3});
+
+        for(let i=0; i<count; i++) {
+            const p = points[i % points.length];
+            targetPos[i*3] = (p.x - 2.5); // Geser ke tengah
+            targetPos[i*3+1] = p.y;
+            targetPos[i*3+2] = (Math.random()-0.5)*1;
+        }
+        particles.material.color.setHex(0xffffff);
+    };
+
+    const setHeart = () => {
+        for(let i=0; i<count; i++) {
+            const t = Math.random() * Math.PI * 2;
+            targetPos[i*3] = 1.6 * Math.pow(Math.sin(t), 3) * 3;
+            targetPos[i*3+1] = (1.3 * Math.cos(t) - 0.5 * Math.cos(2*t) - 0.2 * Math.cos(3*t) - 0.1 * Math.cos(4*t)) * 3;
+            targetPos[i*3+2] = (Math.random()-0.5)*2;
+        }
+        particles.material.color.setHex(0xff0066);
+    };
+
+    const setSphere = () => {
+        for(let i=0; i<count; i++) {
+            const phi = Math.acos(-1 + (2 * i) / count);
+            const theta = Math.sqrt(count * Math.PI) * phi;
+            targetPos[i*3] = 5 * Math.cos(theta) * Math.sin(phi);
+            targetPos[i*3+1] = 5 * Math.sin(theta) * Math.sin(phi);
+            targetPos[i*3+2] = 5 * Math.cos(phi);
+        }
+        particles.material.color.setHex(0x00aaff);
+    };
+
+    // --- DETEKSI GESTURE ---
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+
+    hands.onResults((results) => {
+        const status = document.getElementById('status');
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const lm = results.multiHandLandmarks[0];
+            
+            // Logika Jari
+            const indexUp = lm[8].y < lm[6].y;
+            const middleUp = lm[12].y < lm[10].y;
+            const ringDown = lm[16].y > lm[14].y;
+            const pinkyDown = lm[20].y > lm[18].y;
+            const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+
+            // Kondisi ✌️ (Peace/I Love You)
+            if (indexUp && middleUp && ringDown && pinkyDown) {
+                status.innerText = "✌️ I LOVE YOU ✌️";
+                setLoveText();
+            } 
+            // Kondisi 🫰 (Pinch/Heart)
+            else if (pinchDist < 0.06) {
+                status.innerText = "❤️ LOVE ❤️";
+                setHeart();
+            } 
+            // Kondisi 🤚 (Open/World)
+            else if (indexUp && middleUp && !ringDown) {
+                status.innerText = "🌏 WORLD 🌏";
+                setSphere();
+            }
+        }
+    });
+
+    const videoElement = document.getElementById('video-preview');
+    const cameraUtils = new Camera(videoElement, {
+        onFrame: async () => { await hands.send({image: videoElement}); },
+        width: 480, height: 360
+    });
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const positions = particles.geometry.attributes.position.array;
+        for(let i=0; i<count*3; i++) {
+            positions[i] += (targetPos[i] - positions[i]) * 0.15;
+        }
+        particles.geometry.attributes.position.needsUpdate = true;
+        particles.rotation.y += 0.005;
+        renderer.render(scene, camera);
+    }
+
+    initScene();
+    cameraUtils.start();
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
